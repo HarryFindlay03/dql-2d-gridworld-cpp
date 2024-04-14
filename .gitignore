@@ -1,0 +1,13 @@
+# test driver program
+src/driver.cpp
+
+# build and executable
+/bin
+/build
+
+# Eigen library dependency
+/include/cpp-nn/Eigen
+
+# misc
+/.vscode
+.DS_Store
