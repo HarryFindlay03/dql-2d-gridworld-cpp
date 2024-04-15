@@ -2,7 +2,7 @@
  * AUTHOR: Harry Findlay
  * LICENSE: Shipped with package - GNU GPL v3
  * FILE START: 04/02/2024
- * FILE LAST UPDATED: 27/04/2024
+ * FILE LAST UPDATED: 15/04/2024
  * 
  * REQUIREMENTS: Eigen v3.4.0, src: https://eigen.tuxfamily.org/index.php?title=Main_Page
  * REFERENCES: (Heavy) Inspiration taken from Brian Dolhansky's similar implementation in Python, go check it out!, src: https://github.com/bdol/bdol-ml
@@ -37,6 +37,43 @@ Eigen::MatrixXd vector_f_sigmoid_rl(const Eigen::MatrixXd& in, bool deriv)
         *(temp.data() + i) *= 1 - *(temp.data() + i);
 
     return temp;
+}
+
+
+Eigen::MatrixXd vector_ReLU(const Eigen::MatrixXd& in, bool deriv)
+{
+    Eigen::MatrixXd res = in;
+
+    int i;
+    if(!deriv)
+    {
+        for(i = 0; i < res.size(); i++)
+        {
+            if(*(res.data() + i) < 0)
+                *(res.data() + i) = 0;
+        }
+
+        return res;
+    }
+
+    for(i = 0; i < res.size(); i++)
+    {
+        if(*(res.data() + i) > 0)
+            *(res.data() + i) = 1;
+        else
+            *(res.data() + i) = 0;
+    }
+
+    return res;
+}
+
+
+Eigen::MatrixXd vector_linear(const Eigen::MatrixXd& in, bool deriv)
+{
+    /* remark: deriv unused, here to allow function to be passed to function wrapper in ML_ANN constructor */
+
+    Eigen::MatrixXd res = in;
+    return res;
 }
 
 
@@ -86,11 +123,12 @@ Eigen::MatrixXd Layer::forward_propogate_rl()
 {
     /* remark: output is handled seperately in ML_ANN::forward_propogate_rl()*/
 
-    // input layer - no activation func return data only
+    // if input layer then run Z through activation as this has been set prior
+    // else run input of layer through activation to get Z the layer output (like normal)
     if(is_input)
-        return Z;
-
-    Z = activation_func(S, false);
+        Z = activation_func(Z, false);
+    else
+        Z = activation_func(S, false);
 
     // output is handled seperately in ML_ANN, here just in case. 
     if(is_output)
@@ -103,12 +141,15 @@ Eigen::MatrixXd Layer::forward_propogate_rl()
 
     Eigen::MatrixXd Z_bias = Z;
     Z_bias.conservativeResize(Z_bias.rows() + 1, Z_bias.cols());
-    Z_bias.row(Z_bias.rows()-1) = Eigen::MatrixXd::Ones(1, 1);
+    Z_bias.row(Z_bias.rows()-1) = Eigen::MatrixXd::Ones(1, Z.cols());
 
     // storing f'(S^(i)) for backpropogation step
     Fp = activation_func(S, true);
+    
+    // todo NOTE REMOVED bias values here - bias values caused an explosion of gradient - may need to decrease the bias values etc
+    return (W.transpose().eval()) * Z;
+    // return (W_bias.transpose().eval()) * Z_bias;
 
-    return (W_bias.transpose().eval()) * Z_bias;
 }
 
 
@@ -140,15 +181,15 @@ ML_ANN::ML_ANN(const std::vector<size_t>& layer_config, std::function<Eigen::Mat
     layers.resize(num_layers);
 
     // input layer
-    layers[0] = new Layer(layer_config[0], layer_config[1], true, false, vector_f_sigmoid_rl);
+    layers[0] = new Layer(layer_config[0], layer_config[1], true, false, vector_ReLU);
 
     // hidden layers
     int i;
     for(i = 1; i < (num_layers-1); i++)
-        layers[i] = new Layer(layer_config[i], layer_config[i+1], false, false, vector_f_sigmoid_rl);
+        layers[i] = new Layer(layer_config[i], layer_config[i+1], false, false, vector_ReLU);
 
     // output layer
-    layers[num_layers-1] = new Layer(layer_config[num_layers-1], 0, false, true, vector_f_sigmoid_rl); // activation function not used in Layer - potentially dangerours
+    layers[num_layers-1] = new Layer(layer_config[num_layers-1], 0, false, true, vector_linear);
 }
 
 
@@ -197,57 +238,13 @@ Eigen::MatrixXd ML_ANN::forward_propogate_rl(const std::vector<double>& data)
 
     // forward propogate through hidden layers
     for(i = 1; i < (num_layers-1); i++)
-        layers[i]->S = layers[i-1]->forward_propogate_rl(); 
+        layers[i]->S = layers[i-1]->forward_propogate_rl();
 
     // get output
     layers[num_layers-1]->S = layers[num_layers-2]->forward_propogate_rl();
-    return vector_f_sigmoid_rl(layers[num_layers-1]->S, false);
+    return layers[num_layers-1]->activation_func(layers[num_layers-1]->S, false);
 }
 
-
-void ML_ANN::back_propogate_rl(const double output, const double target)
-{
-    // output layer
-    // output matrix for G
-    Eigen::MatrixXd t_out(1, 1);
-    t_out << (output - target);
-
-    layers[num_layers-1]->G = t_out;
-
-    // backwards through the remaining layers excluding input
-    int i;
-    for(i = (num_layers-2); i > 0; i--)
-    {
-        Eigen::MatrixXd W_nbias = layers[i]->W;
-        layers[i]->G = ML_ANN::elem_wise_product(layers[i]->Fp, (W_nbias * layers[i+1]->G));
-    }
-}
-
-
-void ML_ANN::back_propogate_rl(const Eigen::MatrixXd& output, const std::vector<double>& targets)
-{
-    int n = output.rows();
-    if(!(n == targets.size()))
-    {
-        std::cout << "ERROR: output and targets not the same dimension, skipping BP step!" << std::endl;
-        return;
-    }
-
-    // output layer - (output.size() x 1) dimension
-    Eigen::MatrixXd net_output(n, 1);
-
-    int i;
-    for(i = 0; i < n; i++)
-        net_output(i, 0) = (output(i, 0) - targets[i]);
-
-    layers[num_layers-1]->G = net_output;
-
-    // BP through remaining layers excluding input
-    for(i = (num_layers-2); i > 0; i--)
-        layers[i]->G = ML_ANN::elem_wise_product(layers[i]->Fp, (layers[i]->W * layers[i+1]->G));
-
-    return;
-}
 
 void ML_ANN::back_propogate_rl(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target)
 {

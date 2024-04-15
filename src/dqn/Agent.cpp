@@ -22,7 +22,7 @@
 
 Eigen::MatrixXd l2_loss(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target)
 {
-    Eigen::MatrixXd diff = (output-target);
+    Eigen::MatrixXd diff = (output - target);
 
     int i;
     for(i = 0; i < diff.size(); i++)
@@ -127,21 +127,26 @@ void Agent::sampling(const double epsilon, bool terminate)
     int action_pos = epsilon_greedy_action(curr_st, epsilon);
 
     // execute in emulator and observe reward (moving the agent)
-
-    // if agent finds the food - break the episode early - good reward
-    // if agent does not find food then continue - reward is 0
-    // if agent does not find food within the the limit then break and place small decimal reward
-
     double reward = 0;
-    bool move_validity = move_agent_in_env(action_pos);
-    bool goal_status = check_goal(curr_env, agent_pos);
 
-    if(goal_status)
-        reward = 1;
-    if(terminate)
-        reward = 0.1;
+    bool move_validity = move_agent_in_env(action_pos); /* moving agent */
+    bool goal_status = check_goal(curr_env, agent_pos); /* checking goal */
 
     next_st = get_state_vector(curr_env, agent_pos);
+
+    if(goal_status) /* found food */
+    {
+        terminate = true;
+        reward = 10;
+    }
+    if((!goal_status) && (!terminate)) /* found food but episode not over - negative reward to push for faster finding */
+    {
+        reward = -1;
+    }
+    if((!goal_status) && terminate) /* found food and episode over - worst case */
+    {
+        reward = -10;
+    }
 
     // save to replay buffer
     buff[(curr_buff_pos++) % buffer_size] = new BufferItem(curr_st, action_pos, reward, next_st, terminate);
@@ -191,6 +196,62 @@ void Agent::train_phase()
 }
 
 
+/* TRAINED AGENT USER FUNCTIONS */
+
+
+void Agent::find_food()
+{
+    /* construct new environment */
+    curr_env = construct_env(curr_env.rows(), curr_env.cols(), rnd);
+    agent_pos = get_init_agent_pos(curr_env, rnd);
+
+    // choose action based on Q network, get curr
+    // get current state choose action based on Q network then continue until goal found
+    
+    int iter_pos = 0;
+    bool found = false;
+    while(!found)
+    {
+        std::cout << "Iteration " << iter_pos << std::endl;
+
+        print_environment();
+
+        // get state
+        std::vector<double> st = get_state_vector(curr_env, agent_pos);
+
+        // get q vals from Q net and choose best action
+        Eigen::MatrixXd q_vals = Q->forward_propogate_rl(st);
+
+        std::cout << "Qvals: \n";
+        std::cout << q_vals << std::endl;
+        
+        int i;
+        int best_pos = 0;
+        for(i = 1; i < actions.size(); i++)
+            if(q_vals(i, 0) > q_vals(best_pos, 0))
+                best_pos = i;
+
+
+        move_agent_in_env(best_pos);
+
+        if(check_goal(curr_env, agent_pos))
+        {
+            std::cout << "FOOD FOUND!\n";
+            std::cout << iter_pos << " steps taken.\n";
+            found = true;
+            break;
+        }
+
+        if(iter_pos == 20)
+            break;
+
+        iter_pos++;
+    }
+
+    return;
+}
+
+
 /* HELPER FUNCTIONS */
 
 
@@ -200,7 +261,7 @@ int Agent::epsilon_greedy_action(const std::vector<double>& st, const double eps
 
     double r = rnd->random_double_range(0.0, 1.0);
 
-    if(r > epsilon)
+    if(r > (1 - epsilon))
     {
         int pos = rnd->random_int_range(0, actions.size()-1);
         return pos;
@@ -211,7 +272,7 @@ int Agent::epsilon_greedy_action(const std::vector<double>& st, const double eps
     // find the best available action (remember to penalise if the action takes out of bounds)
     int best_pos = 0;
     int i;
-    for(i = 0; i < actions.size(); i++)
+    for(i = 1; i < actions.size(); i++)
         if((q_vals(i, 0) > q_vals(best_pos, 0)))
             best_pos = i;
 

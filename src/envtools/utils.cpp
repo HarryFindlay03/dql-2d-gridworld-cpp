@@ -53,7 +53,7 @@ std::vector<double> get_state_vector(const Eigen::MatrixXd& env, const std::tupl
             res_state[pos++] = v;
 
     // place agent pos in correct position
-    res_state[((std::get<0>(curr_pos) * env.cols()) + std::get<1>(curr_pos))-1] = 2;
+    res_state[((std::get<0>(curr_pos) * env.cols()) + std::get<1>(curr_pos))] = 1;
 
     return res_state;
 }
@@ -62,4 +62,69 @@ std::vector<double> get_state_vector(const Eigen::MatrixXd& env, const std::tupl
 bool check_goal(const Eigen::MatrixXd& env, const std::tuple<int, int>& agent_pos)
 {
     return (env(std::get<0>(agent_pos), std::get<1>(agent_pos)) == 1);
+}
+
+
+void save_Q_network(ML_ANN* Q, const std::string& filename)
+{
+    std::ofstream output_file(filename.c_str());
+
+    if(!(output_file.is_open()))
+    {
+        std::cerr << "FILENAME ENTERED IS NOT VALID! CANNOT WRITE NETWORK TO FILE\n";
+        return;
+    }
+
+    /* file opened successfully */
+    for(auto const& l : Q->get_layers())
+    {
+        for(auto const& r : (l->W).rowwise())
+        {
+            for(auto const& v : r)
+                output_file << v << '\n';
+        }
+        output_file << "<br>\n"; /* helper to reconstruct network*/
+    }
+}
+
+
+void read_Q_weights(ML_ANN* Q, const std::string& filename)
+{
+    std::ifstream input_file(filename.c_str());
+
+    if(!(input_file.is_open()))
+    {
+        std::cerr << "FILENAME ENTERED IS NOT VALID! CANNOT READ NETWORK FROM FILE\n";
+        return;
+    }
+
+    /* file open success */
+    int layer_pos = 0;
+    int col = 0;
+    int row = 0;
+
+    std::string line;
+    while(getline(input_file, line))
+    {
+        if(layer_pos >= Q->get_num_layers())
+            break;
+
+        if(!(strcmp(line.c_str(), "<br>")))
+        {
+            layer_pos++;
+            col = 0;
+            row = 0;
+            continue;
+        }
+
+        ((Q->get_layers())[layer_pos]->W)(row, col++) = std::stod(line);
+
+        if((col == (Q->get_layers()[layer_pos]->W.cols())))
+        {
+            row++;
+            col = 0;
+        }
+    }
+
+    return;
 }

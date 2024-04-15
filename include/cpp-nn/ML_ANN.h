@@ -39,9 +39,8 @@ public:
 
     Eigen::MatrixXd forward_propogate_rl(const std::vector<double>& data);
 
-    void back_propogate_rl(const double output, const double target);
-    void back_propogate_rl(const Eigen::MatrixXd& output, const std::vector<double>& targets);
-    void back_propogate_rl(const Eigen::MatrixXd& output, const Eigen::MatrixXd& targets);
+    void back_propogate_rl(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target);
+    void back_propogate_rl(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target, int action_pos);
 
     void update_weights_rl(const double eta);
 

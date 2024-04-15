@@ -46,7 +46,10 @@ Eigen::MatrixXd l2_loss(const Eigen::MatrixXd& output, const Eigen::MatrixXd& ta
 class Agent
 {
     /* NETWORKS */
+public:
     ML_ANN* Q;
+
+private:
     ML_ANN* Q_hat;
 
     /* REPLAY BUFFER */
@@ -72,16 +75,6 @@ class Agent
     /* PRIVATE VALUES */
     unsigned int curr_buff_pos;
     RandHelper* rnd;
-
-    // state extraction function
-    // loss function - passed to cpp-nn!
-
-    /**
-     * @brief finds and returns the best q value for q_hat
-     * 
-     * @return double 
-     */
-    inline double best_q_hat_value(const std::vector<double>& new_env_st);
 
 
 public:
@@ -115,6 +108,15 @@ public:
     void sampling(const double epsilon, bool terminate);
 
     void train_phase();
+
+    /* TRAINED AGENT USER FUNCTIONS */
+
+
+    /**
+     * @brief Function that is used once the agent has been trained - constructs an environment
+     * and attemps to find the 'food' within the environment, if the food has been found then report successful.
+     */
+    void find_food();
 
     /* HELPER FUNCTIONS*/
 

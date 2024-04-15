@@ -19,6 +19,8 @@ class Layer
 {
     bool is_input, is_output;
 
+
+public:
     std::function<Eigen::MatrixXd(const Eigen::MatrixXd &, bool)> activation_func;
 
 
