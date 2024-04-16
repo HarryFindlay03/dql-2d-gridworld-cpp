@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <random>
 
-#define RAND_SEED 1234
+#define RAND_SEED 123456
 
 class RandHelper
 {
@@ -32,8 +32,6 @@ public:
         gn.seed(RAND_SEED);
         srand(RAND_SEED);
 
-        rng = std::default_random_engine {};
-
         return;
     };
 
@@ -51,10 +49,16 @@ public:
         return distr(gn);
     }
 
+    double normal_distribution(const double mean, const double sd)
+    {
+        std::normal_distribution<double> distr(mean, sd);
+        return distr(gn);
+    }
+
     int choose_random_action(const std::vector<int>& vec)
     {
         std::vector<int> cp(vec);
-        std::shuffle(cp.begin(), cp.end(), rng);
+        std::shuffle(cp.begin(), cp.end(), gn);
 
         return cp[0];
     }

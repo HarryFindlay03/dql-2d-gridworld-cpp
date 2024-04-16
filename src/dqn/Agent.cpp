@@ -28,6 +28,8 @@ Eigen::MatrixXd l2_loss(const Eigen::MatrixXd& output, const Eigen::MatrixXd& ta
     for(i = 0; i < diff.size(); i++)
         *(diff.data() + i) = std::pow(*(diff.data() + i), 2);
 
+    std::cout << "Diff: \n" << diff << std::endl;
+
     return diff;
 }
 
@@ -64,8 +66,10 @@ Agent::Agent
     agent_pos = get_init_agent_pos(curr_env, rnd);
 
     // instatiate both networks
-    Q = construct_network_from_env(curr_env, 2);
-    Q_hat = construct_network_from_env(curr_env, 2);
+    Q = construct_network_from_env(curr_env, 5);
+    Q_hat = construct_network_from_env(curr_env, 5);
+
+    ML_ANN::small_weight_init(Q, rnd);
 
     // initially set both network weights as equal
     copy_network_weights();
@@ -102,6 +106,7 @@ void Agent::train_optimiser(const double epsilon)
         {
             /* sampling */
             terminate = (((j+1) == episode_length) ? true : false);
+            std::cout << "terminate: " << terminate << std::endl;
             sampling(epsilon, terminate);
 
             /* sample from replay buffer and train */
@@ -120,6 +125,7 @@ void Agent::train_optimiser(const double epsilon)
 
 void Agent::sampling(const double epsilon, bool terminate)
 {
+    std::cout << "SAMPLING\n";
     std::vector<double> curr_st;
     std::vector<double> next_st;
 
@@ -129,7 +135,10 @@ void Agent::sampling(const double epsilon, bool terminate)
     // execute in emulator and observe reward (moving the agent)
     double reward = 0;
 
+    // this function only moves the agent if it stays within bounds - negatively reward more if moves outside of bounds
     bool move_validity = move_agent_in_env(action_pos); /* moving agent */
+
+
     bool goal_status = check_goal(curr_env, agent_pos); /* checking goal */
 
     next_st = get_state_vector(curr_env, agent_pos);
@@ -142,6 +151,8 @@ void Agent::sampling(const double epsilon, bool terminate)
     if((!goal_status) && (!terminate)) /* found food but episode not over - negative reward to push for faster finding */
     {
         reward = -1;
+        if(!move_validity)
+            reward = -2;
     }
     if((!goal_status) && terminate) /* found food and episode over - worst case */
     {
@@ -149,7 +160,23 @@ void Agent::sampling(const double epsilon, bool terminate)
     }
 
     // save to replay buffer
-    buff[(curr_buff_pos++) % buffer_size] = new BufferItem(curr_st, action_pos, reward, next_st, terminate);
+    BufferItem* new_b = new BufferItem(curr_st, action_pos, reward, next_st, terminate);
+    buff[(curr_buff_pos++) % buffer_size] = new_b;
+
+    auto printer = [](const std::vector<double>& vec)
+    {
+        for(auto const& v : vec)
+            std::cout << v << ", ";
+        std::cout << std::endl;
+    };
+
+    std::cout << "Buffer item curr state:\n";
+    printer(new_b->curr_st);
+
+    std::cout << "Buffer item reward: " << new_b->reward << "\n";
+    std::cout << "Buffer item action pos: " << new_b->action_pos << '\n';
+    std::cout << "Buffer item next state : " << '\n';
+    printer(new_b->next_st);
 
     return;
 }
@@ -157,6 +184,7 @@ void Agent::sampling(const double epsilon, bool terminate)
 
 void Agent::train_phase()
 {
+    std::cout << "TRAIN PHASE\n";
     int max_size = (buff[(curr_buff_pos) % buffer_size] == NULL) ? (curr_buff_pos-1) : (buffer_size-1);
     BufferItem* b = buff[rnd->random_int_range(0, max_size)];
 
@@ -172,6 +200,8 @@ void Agent::train_phase()
         // forward prop the preprocessed state
         Eigen::MatrixXd out = Q_hat->forward_propogate_rl(b->get_next_st());
 
+        std::cout << "Q_hat:\n" << out << std::endl;
+
         int i;
         double best_pos = 0;
 
@@ -179,8 +209,13 @@ void Agent::train_phase()
             if(out.row(i)[0] > out.row(best_pos)[0])
                 best_pos = i;
 
+        std::cout << "Reward: " << b->get_reward() << std::endl;
+        std::cout << "Chosen: " << out.row(best_pos)[0] << std::endl;
+
         y_j = b->get_reward() + (discount_rate * out.row(best_pos)[0]);
     }
+
+    std::cout << "Y_j: " << y_j << std::endl;
 
     // gradient descent step only on output node j for action j.
     Eigen::MatrixXd out_Q = Q->forward_propogate_rl(b->get_curr_st());
@@ -191,6 +226,7 @@ void Agent::train_phase()
 
     Q->back_propogate_rl(out_yj, out_Q);
     Q->update_weights_rl(eta);
+
 
     return;    
 }
@@ -266,8 +302,10 @@ int Agent::epsilon_greedy_action(const std::vector<double>& st, const double eps
         int pos = rnd->random_int_range(0, actions.size()-1);
         return pos;
     }
-
     Eigen::MatrixXd q_vals = Q->forward_propogate_rl(st);
+
+    std::cout << "Q_vals:\n" << q_vals << '\n';
+
 
     // find the best available action (remember to penalise if the action takes out of bounds)
     int best_pos = 0;
@@ -275,6 +313,8 @@ int Agent::epsilon_greedy_action(const std::vector<double>& st, const double eps
     for(i = 1; i < actions.size(); i++)
         if((q_vals(i, 0) > q_vals(best_pos, 0)))
             best_pos = i;
+
+    std::cout << "best pos: " << best_pos << std::endl;
 
     return best_pos;
 }
@@ -295,14 +335,14 @@ bool Agent::move_agent_in_env(int action_pos)
         std::get<1>(agent_pos) += 1;
         break;
     case 3: // up
-        if(!(check_bounds(std::make_tuple(std::get<0>(agent_pos)+1, std::get<1>(agent_pos)))))
-            return false;
-        std::get<0>(agent_pos) += 1;
-        break;
-    case 4: // down
         if(!(check_bounds(std::make_tuple(std::get<0>(agent_pos)-1, std::get<1>(agent_pos)))))
             return false;
         std::get<0>(agent_pos) -= 1;
+        break;
+    case 4: // down
+        if(!(check_bounds(std::make_tuple(std::get<0>(agent_pos)+1, std::get<1>(agent_pos)))))
+            return false;
+        std::get<0>(agent_pos) += 1;
         break;
     default:
         break;

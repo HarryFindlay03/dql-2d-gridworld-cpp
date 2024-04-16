@@ -14,6 +14,7 @@
 #ifndef ML_ANN_H
 #define ML_ANN_H
 
+#include "envtools/RandHelper.h"
 
 class ML_ANN
 {
@@ -23,6 +24,13 @@ class ML_ANN
 
     // loss function
     std::function<Eigen::MatrixXd(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target)> loss_func;
+
+    // RandHelper
+    RandHelper* rnd;
+
+    // gradient clip values
+    double min_clip; 
+    double max_clip;
 
 public:
     ML_ANN(const std::vector<size_t>& layer_config, size_t minibatch_size);
@@ -35,7 +43,8 @@ public:
 
     ~ML_ANN();
 
-    static Eigen::MatrixXd elem_wise_product(const Eigen::MatrixXd& lhs, const Eigen::MatrixXd& rhs);
+
+    /* MAIN NN FUNCTIONS */
 
     Eigen::MatrixXd forward_propogate_rl(const std::vector<double>& data);
 
@@ -44,11 +53,28 @@ public:
 
     void update_weights_rl(const double eta);
 
+    Eigen::MatrixXd gradient_clip_by_val(const Eigen::MatrixXd& in);
+
+    /* CLASS HELPER FUNCTIONS */
+
     void set_weight_matrix(const Eigen::MatrixXd& new_weight, const size_t layer_pos) { layers[layer_pos]->set_weight(new_weight); };
 
     inline size_t get_num_layers() { return num_layers; };
 
-    inline const std::vector<Layer*>& get_layers() { return layers; };
+    inline std::vector<Layer*>& get_layers() { return layers; };
+
+    /* STATIC HELPER FUNCTIONS */
+
+    static Eigen::MatrixXd elem_wise_product(const Eigen::MatrixXd& lhs, const Eigen::MatrixXd& rhs);
+
+    /**
+     * @brief Guassian distribution G(0.0, sqrt(2/n)) with mean zero and s.d. sqrt(2/n) where n is the number of inputs into a node.
+     * 
+     * @param net
+     */
+    static void he_weight_init(ML_ANN* net, RandHelper* rnd);
+
+    static void small_weight_init(ML_ANN* net, RandHelper* rnd);
 };
 
 #endif

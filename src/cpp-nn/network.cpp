@@ -70,9 +70,15 @@ Eigen::MatrixXd vector_ReLU(const Eigen::MatrixXd& in, bool deriv)
 
 Eigen::MatrixXd vector_linear(const Eigen::MatrixXd& in, bool deriv)
 {
-    /* remark: deriv unused, here to allow function to be passed to function wrapper in ML_ANN constructor */
+    Eigen::MatrixXd res;
+    if(!deriv)
+    {
+        res = in;
+        return res;
+    }
 
-    Eigen::MatrixXd res = in;
+    // derivative of linear activation function is always one
+    res = Eigen::MatrixXd::Ones(in.rows(), in.cols());
     return res;
 }
 
@@ -99,6 +105,7 @@ Layer::Layer(int curr_size, int next_size, bool is_input, bool is_output, std::f
     {
         S = Eigen::MatrixXd::Zero(curr_size, 1);
         G = Eigen::MatrixXd::Zero(curr_size, 1);
+        Fp = Eigen::MatrixXd::Zero(curr_size, 1);
     }
 
     // input layer and hidden layer
@@ -110,46 +117,64 @@ Layer::Layer(int curr_size, int next_size, bool is_input, bool is_output, std::f
 
         W = Eigen::MatrixXd::NullaryExpr(curr_size, next_size, uni);
     }
-
-    // hidden layer only
-    if((!is_input) && (!is_output))
-    {
-        Fp = Eigen::MatrixXd::Zero(curr_size, 1);
-    }
 }
 
 
+// Eigen::MatrixXd Layer::forward_propogate_rl()
+// {
+//     /* remark: output is handled seperately in ML_ANN::forward_propogate_rl()*/
+
+//     // if input layer then run Z through activation as this has been set prior
+//     // else run input of layer through activation to get Z the layer output (like normal)
+//     // if(is_input)
+//     //     Z = activation_func(Z, false);
+//     // else
+//     //     Z = activation_func(S, false);
+
+//     if(!is_input)
+//         Z = activation_func(S, false); // applying activation function to inputs
+
+//     // output is handled seperately in ML_ANN, here just in case. 
+//     if(is_output)
+//     {
+//         Fp = activation_func(S, true);
+//         return Z;
+//     }
+
+//     // adding bias row to weights and Z
+//     Eigen::MatrixXd W_bias = W;
+//     W_bias.conservativeResize(W_bias.rows() + 1, W_bias.cols());
+//     W_bias.row(W_bias.rows()-1) = Eigen::MatrixXd::Ones(1, W.cols());
+
+//     Eigen::MatrixXd Z_bias = Z;
+//     Z_bias.conservativeResize(Z_bias.rows() + 1, Z_bias.cols());
+//     Z_bias.row(Z_bias.rows()-1) = Eigen::MatrixXd::Ones(1, Z.cols());
+
+//     // storing f'(S^(i)) for backpropogation step
+//     Fp = activation_func(S, true);
+    
+//     // todo NOTE REMOVED bias values here - bias values caused an explosion of gradient - may need to decrease the bias values etc
+//     return (W.transpose().eval()) * Z;
+//     // return (W_bias.transpose().eval()) * Z_bias;
+
+// }
+
 Eigen::MatrixXd Layer::forward_propogate_rl()
 {
-    /* remark: output is handled seperately in ML_ANN::forward_propogate_rl()*/
-
-    // if input layer then run Z through activation as this has been set prior
-    // else run input of layer through activation to get Z the layer output (like normal)
+    /* input is not handled here, please handle input seperately */
     if(is_input)
-        Z = activation_func(Z, false);
-    else
-        Z = activation_func(S, false);
+        return Z;
 
-    // output is handled seperately in ML_ANN, here just in case. 
+        
+    Z = activation_func(S, false);
+
+    // storing derivative of activation func for later
+    Fp = activation_func(S, true);
+
     if(is_output)
         return Z;
 
-    // adding bias row to weights and Z
-    Eigen::MatrixXd W_bias = W;
-    W_bias.conservativeResize(W_bias.rows() + 1, W_bias.cols());
-    W_bias.row(W_bias.rows()-1) = Eigen::MatrixXd::Ones(1, W.cols());
-
-    Eigen::MatrixXd Z_bias = Z;
-    Z_bias.conservativeResize(Z_bias.rows() + 1, Z_bias.cols());
-    Z_bias.row(Z_bias.rows()-1) = Eigen::MatrixXd::Ones(1, Z.cols());
-
-    // storing f'(S^(i)) for backpropogation step
-    Fp = activation_func(S, true);
-    
-    // todo NOTE REMOVED bias values here - bias values caused an explosion of gradient - may need to decrease the bias values etc
     return (W.transpose().eval()) * Z;
-    // return (W_bias.transpose().eval()) * Z_bias;
-
 }
 
 
@@ -177,6 +202,13 @@ void Layer::set_weight(const Eigen::MatrixXd& new_weight)
 ML_ANN::ML_ANN(const std::vector<size_t>& layer_config, std::function<Eigen::MatrixXd(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target)> loss_func)
 : loss_func(loss_func)
 {
+    // instantiation random number generator
+    rnd = new RandHelper();
+
+    // setting clip values
+    min_clip = -0.5;
+    max_clip = 0.5;
+
     num_layers = layer_config.size();
     layers.resize(num_layers);
 
@@ -197,6 +229,8 @@ ML_ANN::~ML_ANN()
 {
     for(auto it = layers.begin(); it != layers.end(); ++it)
         delete *it;
+
+    delete rnd;
 }
 
 
@@ -220,6 +254,9 @@ Eigen::MatrixXd ML_ANN::elem_wise_product(const Eigen::MatrixXd& lhs, const Eige
 }
 
 
+/* MAIN NN FUNCTIONS */
+
+
 Eigen::MatrixXd ML_ANN::forward_propogate_rl(const std::vector<double>& data)
 {
     auto l_ptr_0 = layers[0];
@@ -231,18 +268,22 @@ Eigen::MatrixXd ML_ANN::forward_propogate_rl(const std::vector<double>& data)
         std::exit(-1);
     }
 
-    // input layer - set Z to data
+    // input layer - set Z to data - no activation function here
     int i;
     for(i = 0; i < l_ptr_0->Z.size(); i++)
         *(l_ptr_0->Z.data() + i) = data[i];
 
-    // forward propogate through hidden layers
-    for(i = 1; i < (num_layers-1); i++)
-        layers[i]->S = layers[i-1]->forward_propogate_rl();
+    layers[1]->S = layers[0]->Z;
 
-    // get output
-    layers[num_layers-1]->S = layers[num_layers-2]->forward_propogate_rl();
-    return layers[num_layers-1]->activation_func(layers[num_layers-1]->S, false);
+    // forward propogate through to the output layer - setting input to next as output of prev
+    for(i = 1; i < num_layers; i++)
+    {
+        layers[i]->S = layers[i-1]->forward_propogate_rl();
+    }
+
+    // process output layer
+    Eigen::MatrixXd res = layers[num_layers-1]->forward_propogate_rl();
+    return res;
 }
 
 
@@ -254,20 +295,95 @@ void ML_ANN::back_propogate_rl(const Eigen::MatrixXd& output, const Eigen::Matri
         return;
     }
 
-    layers[num_layers-1]->G = loss_func(output, target);
+    // output
+    Eigen::MatrixXd loss = loss_func(output, target);
+    layers[num_layers-1]->G = gradient_clip_by_val(ML_ANN::elem_wise_product(layers[num_layers-1]->Fp, loss));
+    std::cout << "G(Output: " << num_layers-1 << "):\n" << layers[num_layers-1]->G << std::endl;
 
+    std::cout << "Hello" << std::endl;
     // BP through remaining layers excluding input
     int i;
     for(i = (num_layers-2); i > 0; i--)
-        layers[i]->G = ML_ANN::elem_wise_product(layers[i]->Fp, (layers[i]->W * layers[i+1]->G));
+    {
+        layers[i]->G = gradient_clip_by_val(ML_ANN::elem_wise_product(layers[i]->Fp, (layers[i]->W * layers[i+1]->G)));
+        std::cout << "G(" << i << "):\n"
+                  << layers[i]->G << std::endl;
+    }
+
+    return;
+}
+
+// todo this function just seems a bit wrong !
+void ML_ANN::update_weights_rl(const double eta)
+{
+    int i, x, y;
+    for(i = 0; i < (num_layers-1); i++)
+    {
+        // std::cout << "G: \n" << layers[i+1] ->G << std::endl;
+        Eigen::MatrixXd res = -(eta) * (layers[i+1]->G * layers[i]->Z.transpose().eval()).transpose().eval();
+        layers[i]->W += res;
+    }
+}
+
+
+Eigen::MatrixXd ML_ANN::gradient_clip_by_val(const Eigen::MatrixXd& g_mat)
+{
+    Eigen::MatrixXd res_mat = g_mat;
+
+    int i;
+    for(i = 0; i < g_mat.rows(); i++)
+    {
+        if(g_mat(i, 0) > max_clip)
+            res_mat(i, 0) = max_clip;
+        if(g_mat(i, 0) < min_clip)
+            res_mat(i, 0) = min_clip;
+    }
+
+    return res_mat;
+}
+
+
+/* WEIGHT INITIALISATION */
+
+
+void ML_ANN::he_weight_init(ML_ANN* net, RandHelper* rnd)
+{
+    // for each weight network apply He's rule
+
+    int i, j;
+    for(i = 0; i < net->num_layers; i++)
+    {
+        // for each value in w_mat look at the dimension of the previous layer
+        // the number of inputs is the number of rows
+
+        Eigen::MatrixXd w_mat(net->get_layers()[i]->W.rows(), net->get_layers()[i]->W.cols());
+        int prev_rows = (i != 0) ? net->get_layers()[i-1]->W.rows() : 1;
+
+        for(j = 0; j < w_mat.size(); j++)
+            *(w_mat.data() + j) = rnd->normal_distribution(0.0, std::sqrt(2.0 / (double)prev_rows));
+
+        net->get_layers()[i]->set_weight(w_mat);
+    }
 
     return;
 }
 
 
-void ML_ANN::update_weights_rl(const double eta)
+void ML_ANN::small_weight_init(ML_ANN* net, RandHelper* rnd)
 {
-    int i;
-    for(i = 0; i < (num_layers-1); i++)
-        layers[i]->W += -(eta) * (layers[i+1]->G * layers[i]->Z.transpose().eval()).transpose().eval();
+
+    int i, j;
+    for(i = 0; i < net->num_layers; i++)
+    {
+        // for each value in w_mat look at the dimension of the previous layer
+        // the number of inputs is the number of rows
+        Eigen::MatrixXd w_mat(net->get_layers()[i]->W.rows(), net->get_layers()[i]->W.cols());
+
+        for(j = 0; j < w_mat.size(); j++)
+            *(w_mat.data() + j) = rnd->random_double_range(0.0, 0.1);
+
+        net->get_layers()[i]->set_weight(w_mat);
+    }
+
+    return;
 }
