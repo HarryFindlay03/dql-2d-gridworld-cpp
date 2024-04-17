@@ -1,5 +1,5 @@
 # test driver program
-src/driver.cpp
+src/driver*
 
 # build and executable
 /bin

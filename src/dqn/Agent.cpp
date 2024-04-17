@@ -19,16 +19,18 @@
 
 /* HELPER FUNCTIONS */
 
-
+// todo this loss function seems to be acting a little funny! 
 Eigen::MatrixXd l2_loss(const Eigen::MatrixXd& output, const Eigen::MatrixXd& target)
 {
     Eigen::MatrixXd diff = (output - target);
 
-    int i;
-    for(i = 0; i < diff.size(); i++)
-        *(diff.data() + i) = std::pow(*(diff.data() + i), 2);
-
     std::cout << "Diff: \n" << diff << std::endl;
+
+    int i;
+    for(i = 0; i < diff.rows(); i++)
+        diff(i, 0) *= diff(i, 0);
+
+    std::cout << "Diff squared: \n" << diff << std::endl;
 
     return diff;
 }

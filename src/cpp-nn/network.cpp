@@ -161,15 +161,15 @@ Layer::Layer(int curr_size, int next_size, bool is_input, bool is_output, std::f
 
 Eigen::MatrixXd Layer::forward_propogate_rl()
 {
-    /* input is not handled here, please handle input seperately */
-    if(is_input)
-        return Z;
+    // input layer does not have activation function - Z has been set prior to this function 
+    if(!is_input)
+    {
+        Z = activation_func(S, false);
 
-        
-    Z = activation_func(S, false);
+        // storing derivative of activation func for later
+        Fp = activation_func(S, true);
+    }
 
-    // storing derivative of activation func for later
-    Fp = activation_func(S, true);
 
     if(is_output)
         return Z;
@@ -273,12 +273,13 @@ Eigen::MatrixXd ML_ANN::forward_propogate_rl(const std::vector<double>& data)
     for(i = 0; i < l_ptr_0->Z.size(); i++)
         *(l_ptr_0->Z.data() + i) = data[i];
 
-    layers[1]->S = layers[0]->Z;
+    // layers[1]->S = layers[0]->Z;
 
     // forward propogate through to the output layer - setting input to next as output of prev
     for(i = 1; i < num_layers; i++)
     {
         layers[i]->S = layers[i-1]->forward_propogate_rl();
+        std::cout << "S (" << i << "):\n" << layers[i]->S << std::endl;
     }
 
     // process output layer
@@ -297,15 +298,14 @@ void ML_ANN::back_propogate_rl(const Eigen::MatrixXd& output, const Eigen::Matri
 
     // output
     Eigen::MatrixXd loss = loss_func(output, target);
-    layers[num_layers-1]->G = gradient_clip_by_val(ML_ANN::elem_wise_product(layers[num_layers-1]->Fp, loss));
+    layers[num_layers-1]->G = ML_ANN::elem_wise_product(layers[num_layers-1]->Fp, loss);
     std::cout << "G(Output: " << num_layers-1 << "):\n" << layers[num_layers-1]->G << std::endl;
 
-    std::cout << "Hello" << std::endl;
     // BP through remaining layers excluding input
     int i;
     for(i = (num_layers-2); i > 0; i--)
     {
-        layers[i]->G = gradient_clip_by_val(ML_ANN::elem_wise_product(layers[i]->Fp, (layers[i]->W * layers[i+1]->G)));
+        layers[i]->G = ML_ANN::elem_wise_product(layers[i]->Fp, (layers[i]->W * layers[i+1]->G));
         std::cout << "G(" << i << "):\n"
                   << layers[i]->G << std::endl;
     }
@@ -320,7 +320,8 @@ void ML_ANN::update_weights_rl(const double eta)
     for(i = 0; i < (num_layers-1); i++)
     {
         // std::cout << "G: \n" << layers[i+1] ->G << std::endl;
-        Eigen::MatrixXd res = -(eta) * (layers[i+1]->G * layers[i]->Z.transpose().eval()).transpose().eval();
+        // Eigen::MatrixXd res = -(eta) * (layers[i+1]->G * layers[i]->Z.transpose().eval()).transpose().eval();
+        Eigen::MatrixXd res = eta * ((layers[i]->Z) * (layers[i+1]->G.transpose().eval()));
         layers[i]->W += res;
     }
 }
